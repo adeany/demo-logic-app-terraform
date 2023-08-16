@@ -32,6 +32,11 @@ variable "app_plan_sku" {
   description = "App Service Plan SKU"
 }
 
+variable "log_analytics_workspace_sku" {
+  type = string
+  description = "Log Analytics Workspace SKU"
+}
+
 variable "logic_app_name" {
   type = string
   description = "Logic App name"
@@ -64,6 +69,11 @@ resource "azurerm_resource_group" "rg" {
   location = var.location
 }
 
+# Fetch local IP address for network rules
+data "http" "myip" {
+  url = "https://ipv4.icanhazip.com"
+}
+
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_account
 resource "azurerm_storage_account" "storage" {
   name                = var.storage_account_name
@@ -80,11 +90,11 @@ resource "azurerm_storage_account" "storage" {
   network_rules {
     default_action = "Deny"
     bypass         = ["AzureServices"]
-
     # Allow agent's IP access for file share creation
     # Not required if agent already has private network access
     ip_rules       = [chomp(data.http.myip.response_body)]
   }
+  
 }
 
 ### APPLICATION INSIGHTS ###
@@ -93,7 +103,7 @@ resource "azurerm_log_analytics_workspace" "workspace" {
   name                = "log-analytics-${var.app_insights_name}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  sku                 = "PerGB2018"
+  sku                 = var.log_analytics_workspace_sku
   retention_in_days   = 30
 }
 
@@ -118,17 +128,13 @@ resource "azurerm_service_plan" "asp" {
 
 ### LOGIC APP ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/logic_app_standard
-resource "azurerm_logic_app_standard" "example" {
+resource "azurerm_logic_app_standard" "logic_app" {
   name                       = var.logic_app_name
   location                   = azurerm_resource_group.rg.location
   resource_group_name        = azurerm_resource_group.rg.name
   app_service_plan_id        = azurerm_service_plan.asp.id
   storage_account_name       = var.storage_account_name
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
-
-  site_config {
-    application_insights_connection_string = azurerm_application_insights.app_insights.connection_string
-  }
 
   app_settings = {
     "FUNCTIONS_WORKER_RUNTIME"     = "node"

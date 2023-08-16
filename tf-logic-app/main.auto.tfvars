@@ -13,9 +13,10 @@ storage_account_name = "storamdlogicapp02"
 
 # APP SERVICE PLAN
 app_plan_name = "asp-amd-logic-app-02"
-app_plan_sku = "EP1"
+app_plan_sku = "WS1"
 
 # App Insights
+log_analytics_workspace_sku = "PerGB2018"
 app_insights_name = "ai-amd-logic-app-02"
 
 # Logic App

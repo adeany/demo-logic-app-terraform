@@ -87,6 +87,25 @@ resource "azurerm_storage_account" "storage" {
   }
 }
 
+### APPLICATION INSIGHTS ###
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace
+resource "azurerm_log_analytics_workspace" "workspace" {
+  name                = "log-analytics-${var.app_insights_name}"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights
+resource "azurerm_application_insights" "app_insights" {
+  name                = var.app_insights_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  workspace_id        = azurerm_log_analytics_workspace.workspace.id
+  application_type    = "web"
+}
+
 ### APP PLAN ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/service_plan
 resource "azurerm_service_plan" "asp" {
@@ -106,6 +125,10 @@ resource "azurerm_logic_app_standard" "example" {
   app_service_plan_id        = azurerm_service_plan.asp.id
   storage_account_name       = var.storage_account_name
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
+
+  site_config {
+    application_insights_connection_string = azurerm_application_insights.app_insights.connection_string
+  }
 
   app_settings = {
     "FUNCTIONS_WORKER_RUNTIME"     = "node"

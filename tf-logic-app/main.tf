@@ -17,6 +17,26 @@ variable "vnet_address_space" {
   description = "Virtual network IP address space"
 }
 
+variable "snet_common_name" {
+  type = string
+  description = "Common subnet name"
+}
+
+variable "snet_common_cidr" {
+  type = string
+  description = "CIDR for Common subnet"
+}
+
+variable "snet_appplan_name" {
+  type = string
+  description = "AppPlan subnet name"
+}
+  
+variable "snet_appplan_cidr" {
+  type = string
+  description = "CIDR for AppPlan subnet"
+}
+
 variable "storage_account_name" {
   type = string
   description = "Storage account name"
@@ -69,6 +89,63 @@ resource "azurerm_resource_group" "rg" {
   location = var.location
 }
 
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_network
+resource "azurerm_virtual_network" "vnet" {
+  name = var.vnet_name
+  location = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space = var.vnet_address_space
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet
+resource "azurerm_subnet" "snet_common" {
+  name = var.snet_common_name
+  resource_group_name = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes = [var.snet_common_cidr]
+  private_endpoint_network_policies_enabled = false
+}
+
+resource "azurerm_subnet" "snet_appplan" {
+  name = var.snet_appplan_name
+  resource_group_name = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes = [var.snet_appplan_cidr]
+
+  delegation {
+    name = "delegation"
+    service_delegation {
+      name = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/network_security_group.html
+resource "azurerm_network_security_group" "nsg_common" {
+  name                = "nsg-common"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_network_security_group" "nsg_appplan" {
+  name                = "nsg-appplan"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_network_security_group_association
+resource "azurerm_subnet_network_security_group_association" "snet_nsg_common" {
+  subnet_id                 = azurerm_subnet.snet_common.id
+  network_security_group_id = azurerm_network_security_group.nsg_common.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "snet_nsg_appplan" {
+  subnet_id                 = azurerm_subnet.snet_appplan.id
+  network_security_group_id = azurerm_network_security_group.nsg_appplan.id
+}
+
+### STORAGE ###
 # Fetch local IP address for network rules
 data "http" "myip" {
   url = "https://ipv4.icanhazip.com"
@@ -95,6 +172,50 @@ resource "azurerm_storage_account" "storage" {
     ip_rules       = [chomp(data.http.myip.response_body)]
   }
   
+}
+
+# Private Endpoint - Blob
+module "pe_blob" {
+  source = "./modules/storage-pe"
+
+  rg = azurerm_resource_group.rg
+  vnet = azurerm_virtual_network.vnet
+  subnet = azurerm_subnet.snet_common
+  storage_account = azurerm_storage_account.storage
+  subresource = "blob"
+}
+
+# Private Endpoint - Table
+module "pe_table" {
+  source = "./modules/storage-pe"
+
+  rg = azurerm_resource_group.rg
+  vnet = azurerm_virtual_network.vnet
+  subnet = azurerm_subnet.snet_common
+  storage_account = azurerm_storage_account.storage
+  subresource = "table"
+}
+
+# Private Endpoint - Queue
+module "pe_queue" {
+  source = "./modules/storage-pe"
+
+  rg = azurerm_resource_group.rg
+  vnet = azurerm_virtual_network.vnet
+  subnet = azurerm_subnet.snet_common
+  storage_account = azurerm_storage_account.storage
+  subresource = "queue"
+}
+
+# Private Endpoint - File
+module "pe_file" {
+  source = "./modules/storage-pe"
+
+  rg = azurerm_resource_group.rg
+  vnet = azurerm_virtual_network.vnet
+  subnet = azurerm_subnet.snet_common
+  storage_account = azurerm_storage_account.storage
+  subresource = "file"
 }
 
 ### APPLICATION INSIGHTS ###
@@ -126,6 +247,19 @@ resource "azurerm_service_plan" "asp" {
   sku_name            = var.app_plan_sku
 }
 
+# Creating the storage share ahead of time allows us to attach to a private storage account
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_share
+resource "azurerm_storage_share" "share" {
+  name                 = "${var.logic_app_name}-content"
+  storage_account_name = azurerm_storage_account.storage.name
+  access_tier          = "TransactionOptimized"
+  quota                = 5120
+
+  depends_on = [
+    azurerm_storage_account.storage
+  ]
+}
+
 ### LOGIC APP ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/logic_app_standard
 resource "azurerm_logic_app_standard" "logic_app" {
@@ -139,6 +273,12 @@ resource "azurerm_logic_app_standard" "logic_app" {
   app_settings = {
     "FUNCTIONS_WORKER_RUNTIME"     = "node"
     "WEBSITE_NODE_DEFAULT_VERSION" = "~18"
+    "WEBSITE_CONTENTOVERVNET" = "1"
+    "WEBSITE_VNET_ROUTE_ALL" = "1"
   }
+
+  depends_on = [
+    azurerm_storage_share.share
+  ]
 }
 

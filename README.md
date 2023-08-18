@@ -1,1 +1,13 @@
-This project demonstrates using Terraform to create a Logic App (Standard / Single Tenant).
+# demo-logicapp-terraform
+
+This project includes two Terraform templates for [Azure Logic Apps](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-overview):
+
+### [tf-logicapp-private](/tf-logicapp-private/)
+
+Creates a virtual network and private Azure Logic App (Standard) within that network for private-only access.
+
+To facilitate testing, it also creates a VM jump host.
+
+### [tf-logicapp-consumption](/tf-logicapp-consumption/)
+
+Creates a simple Logic App (Consumption) workflow with no network restrictions.

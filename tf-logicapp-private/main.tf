@@ -1,74 +1,4 @@
-variable "rg_name" {
-  type = string
-}
-
-variable "location" {
-  type = string
-  default = "westus3"
-}
-
-variable "vnet_name" {
-  type = string
-  description = "Virtual Network name"
-}
-
-variable "vnet_address_space" {
-  type = list(string)
-  description = "Virtual network IP address space"
-}
-
-variable "snet_common_name" {
-  type = string
-  description = "Common subnet name"
-}
-
-variable "snet_common_cidr" {
-  type = string
-  description = "CIDR for Common subnet"
-}
-
-variable "snet_appplan_name" {
-  type = string
-  description = "AppPlan subnet name"
-}
-  
-variable "snet_appplan_cidr" {
-  type = string
-  description = "CIDR for AppPlan subnet"
-}
-
-variable "storage_account_name" {
-  type = string
-  description = "Storage account name"
-}
-
-variable "app_plan_name" {
-  type = string
-  description = "App Service Plan name"
-}
-
-variable "app_plan_sku" {
-  type = string
-  description = "App Service Plan SKU"
-}
-
-variable "log_analytics_workspace_sku" {
-  type = string
-  description = "Log Analytics Workspace SKU"
-}
-
-variable "logic_app_name" {
-  type = string
-  description = "Logic App name"
-}
-
-variable "app_insights_name" {
-  type = string
-  description = "Application Insights name"
-}
-
 terraform {
-  required_version = ">= 0.14"
   required_providers {
     azurerm = {
       source = "hashicorp/azurerm"
@@ -78,17 +8,17 @@ terraform {
 }
 
 provider "azurerm" {
-  # Configuration options
   features {}
+  # Configuration options
 }
 
-### NETWORKING ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_group
 resource "azurerm_resource_group" "rg" {
   name     = var.rg_name
   location = var.location
 }
 
+### NETWORKING ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_network
 resource "azurerm_virtual_network" "vnet" {
   name = var.vnet_name
@@ -127,7 +57,6 @@ resource "azurerm_network_security_group" "nsg_common" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
 }
-
 resource "azurerm_network_security_group" "nsg_appplan" {
   name                = "nsg-appplan"
   location            = azurerm_resource_group.rg.location
@@ -139,7 +68,6 @@ resource "azurerm_subnet_network_security_group_association" "snet_nsg_common" {
   subnet_id                 = azurerm_subnet.snet_common.id
   network_security_group_id = azurerm_network_security_group.nsg_common.id
 }
-
 resource "azurerm_subnet_network_security_group_association" "snet_nsg_appplan" {
   subnet_id                 = azurerm_subnet.snet_appplan.id
   network_security_group_id = azurerm_network_security_group.nsg_appplan.id
@@ -153,7 +81,7 @@ data "http" "myip" {
 
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_account
 resource "azurerm_storage_account" "storage" {
-  name                = var.storage_account_name
+  name                     = var.storage_account_name
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
 
@@ -167,11 +95,11 @@ resource "azurerm_storage_account" "storage" {
   network_rules {
     default_action = "Deny"
     bypass         = ["AzureServices"]
+
     # Allow agent's IP access for file share creation
     # Not required if agent already has private network access
     ip_rules       = [chomp(data.http.myip.response_body)]
   }
-  
 }
 
 # Private Endpoint - Blob
@@ -218,67 +146,175 @@ module "pe_file" {
   subresource = "file"
 }
 
-### APPLICATION INSIGHTS ###
-# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace
-resource "azurerm_log_analytics_workspace" "workspace" {
-  name                = "log-analytics-${var.app_insights_name}"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  sku                 = var.log_analytics_workspace_sku
-  retention_in_days   = 30
-}
-
-# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights
-resource "azurerm_application_insights" "app_insights" {
-  name                = var.app_insights_name
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  workspace_id        = azurerm_log_analytics_workspace.workspace.id
-  application_type    = "web"
-}
-
-### APP PLAN ###
+# ### APP PLAN ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/service_plan
 resource "azurerm_service_plan" "asp" {
   name                = var.app_plan_name
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  os_type             = "Linux"
+  os_type             = var.app_plan_os_type
   sku_name            = var.app_plan_sku
+}
+
+### LOGIC APP ###
+# Create a unique string to use as the suffix of the file share
+# https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string
+resource "random_string" "storage_share_suffix" {
+  length  = 5
+  numeric = false
+  special = false
+  upper   = false
 }
 
 # Creating the storage share ahead of time allows us to attach to a private storage account
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_share
 resource "azurerm_storage_share" "share" {
-  name                 = "${var.logic_app_name}-content"
+  name                 = "${var.logic_app_name}-${random_string.storage_share_suffix.result}"
   storage_account_name = azurerm_storage_account.storage.name
   access_tier          = "TransactionOptimized"
   quota                = 5120
-
-  depends_on = [
-    azurerm_storage_account.storage
-  ]
 }
 
-### LOGIC APP ###
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/logic_app_standard
-resource "azurerm_logic_app_standard" "logic_app" {
+resource "azurerm_logic_app_standard" "app" {
   name                       = var.logic_app_name
   location                   = azurerm_resource_group.rg.location
   resource_group_name        = azurerm_resource_group.rg.name
   app_service_plan_id        = azurerm_service_plan.asp.id
-  storage_account_name       = var.storage_account_name
+  virtual_network_subnet_id  = azurerm_subnet.snet_appplan.id
+
+  storage_account_name       = azurerm_storage_account.storage.name
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
+  storage_account_share_name = azurerm_storage_share.share.name
+
+  version = "~4"
+  https_only = true
 
   app_settings = {
-    "FUNCTIONS_WORKER_RUNTIME"     = "node"
-    "WEBSITE_NODE_DEFAULT_VERSION" = "~18"
-    "WEBSITE_CONTENTOVERVNET" = "1"
-    "WEBSITE_VNET_ROUTE_ALL" = "1"
+    FUNCTIONS_WORKER_RUNTIME     = "node"
+    WEBSITE_NODE_DEFAULT_VERSION = "~18"
+    WEBSITE_CONTENTOVERVNET      = "1"
   }
 
-  depends_on = [
-    azurerm_storage_share.share
-  ]
+  site_config {
+    vnet_route_all_enabled           = true
+    dotnet_framework_version         = "v6.0"
+    use_32_bit_worker_process        = false
+    runtime_scale_monitoring_enabled = true
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
 }
 
+# Private DNS Zone for Logic App
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_dns_zone
+resource "azurerm_private_dns_zone" "dns_zone_logicapp" {
+  name                = "privatelink.azurewebsites.net"
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_dns_zone_virtual_network_link
+resource "azurerm_private_dns_zone_virtual_network_link" "dns_vnet_pe_storage" {
+  name = "privatelink.azurewebsites.net-${azurerm_virtual_network.vnet.name}"
+  resource_group_name = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.dns_zone_logicapp.name
+  virtual_network_id = azurerm_virtual_network.vnet.id
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_endpoint
+resource "azurerm_private_endpoint" "pe_logicapp" {
+  name = "pe-${azurerm_logic_app_standard.app.name}"
+  location = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id = azurerm_subnet.snet_common.id
+  custom_network_interface_name = "pe-${azurerm_logic_app_standard.app.name}-nic"
+
+  private_dns_zone_group {
+    name = "dns-pe-${azurerm_logic_app_standard.app.name}"
+    private_dns_zone_ids = [ azurerm_private_dns_zone.dns_zone_logicapp.id ]
+  }
+
+  private_service_connection {
+    name = "plink-${azurerm_logic_app_standard.app.name}"
+    is_manual_connection = false
+    private_connection_resource_id = azurerm_logic_app_standard.app.id
+    subresource_names = [ "sites" ]
+  }
+}
+
+### VIRTUAL MACHINE (Jump Box) ###
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/public_ip
+resource "azurerm_public_ip" "pip_vm_jumpbox" {
+  name                = var.vm_pip_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface
+resource "azurerm_network_interface" "nic_vm_jumpbox" {
+  name                = "${var.vm_jumpbox_name}-nic"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.snet_common.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.pip_vm_jumpbox.id
+  }
+}
+
+# https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key
+resource "tls_private_key" "vm_jumphost_ssh_key" {
+    algorithm = "RSA"
+    rsa_bits = 4096
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/linux_virtual_machine
+resource "azurerm_linux_virtual_machine" "vm_jumpbox" {
+  name                = var.vm_jumpbox_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  size                = var.vm_jumpbox_sku
+  admin_username      = var.vm_jumpbox_user
+  network_interface_ids = [
+    azurerm_network_interface.nic_vm_jumpbox.id,
+  ]
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  admin_ssh_key {
+    username   = var.vm_jumpbox_user
+    public_key = tls_private_key.vm_jumphost_ssh_key.public_key_openssh
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+    name                 = "${var.vm_jumpbox_name}-os-disk"
+  }
+
+  # az vm image list-offers -l westus3 --publisher Canonical --query "[?contains(name, 'focal')]"
+  # az vm image list-skus -l westus3 --publisher Canonical --offer 0001-com-ubuntu-server-focal
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-focal"
+    sku       = "20_04-lts-gen2"
+    version   = "latest"
+  }
+}
+
+# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension
+# Connect with az ssh vm --ip $IP_ADDRESS
+resource "azurerm_virtual_machine_extension" "vm_jumpbox_aadlogin" {
+  name                 = "AADSSHLogin"
+  virtual_machine_id   = azurerm_linux_virtual_machine.vm_jumpbox.id
+  publisher            = "Microsoft.Azure.ActiveDirectory"
+  type                 = "AADSSHLoginForLinux"
+  type_handler_version = "1.0"
+}

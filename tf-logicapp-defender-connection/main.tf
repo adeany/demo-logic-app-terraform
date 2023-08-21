@@ -90,28 +90,3 @@ resource "azurerm_logic_app_trigger_custom" "denfender_for_cloud" {
 BODY
 }
 
-# resource "azurerm_logic_app_action_custom" "defender_to_pagerduty_functionapp" {
-  # depends_on = [
-  #   azuread_application.defender_to_pagerduty_app_registration
-  # ]
-
-#   name         = var.function_app_name
-#   logic_app_id = azurerm_logic_app_workflow.defender_to_pagerduty.id
-
-#   body = <<BODY
-# {    
-#     "inputs": {
-#         "authentication": {
-#             "audience": "${azuread_application.defender_to_pagerduty_app_registration.application_id}",
-#             "type": "ManagedServiceIdentity"
-#         },
-#         "body": "@triggerBody()",
-#         "function": {
-#             "id": "${azurerm_function_app_function.defender_to_pagerduty.id}"
-#         }
-#     },
-#     "runAfter": {},
-#     "type": "Function"    
-# }    
-# BODY
-# }

@@ -27,11 +27,8 @@ resource "azurerm_resource_group" "rg" {
 }
 
 data "azurerm_managed_api" "defender_assessment" {
-  # This was created manually in the portal due to there is no defender tf resource yet
   name     = var.connection_name
   location = azurerm_resource_group.rg.location
-  # id should look like this:
-  # "/subscriptions/${data.azurerm_subscription.current.subscription_id}/providers/Microsoft.Web/locations/westus3/managedApis/ascassessment"
 }
 
 resource "azurerm_api_connection" "defender_api_connection" {
